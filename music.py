@@ -175,8 +175,6 @@ class LoopFinderApp:
         self.frame_middle = tk.Frame(root, pady=5)
         self.frame_middle.pack(fill=tk.BOTH, expand=True)
 
-        self.btn_analyze = tk.Button(self.frame_middle, text="Find Loops", command=self.run_analysis, state=tk.DISABLED)
-        self.btn_analyze.pack(pady=(0, 5))
 
         self.lbl_loops = tk.Label(self.frame_middle, text="Potential Loop Points:")
         self.lbl_loops.pack(anchor="w", padx=5)
@@ -242,7 +240,6 @@ class LoopFinderApp:
         self.lbl_filename.config(text=os.path.basename(self.filepath), fg="black")
         self.set_status(f"Loading {os.path.basename(self.filepath)}...")
         self.listbox_loops.delete(0, tk.END)
-        self.btn_analyze.config(state=tk.DISABLED)
         self.btn_preview.config(state=tk.DISABLED)
         self.btn_play_loop.config(state=tk.DISABLED) # Disable loop button too
         self.btn_save_with_loop.config(state=tk.DISABLED)
@@ -266,7 +263,6 @@ class LoopFinderApp:
                 self.y = self.y.astype(np.float32)
 
             self.set_status("Audio loaded successfully. Ready to analyze.")
-            self.root.after(0, lambda: self.btn_analyze.config(state=tk.NORMAL)) # Update GUI in main thread
             # automatically analyze the audio file
             self.run_analysis()
         except Exception as e:
@@ -286,7 +282,6 @@ class LoopFinderApp:
 
         self.stop_playback() # Stop playback before analysis
         self.set_status("Analyzing audio for loops... (this may take a while)")
-        self.btn_analyze.config(state=tk.DISABLED)
         self.btn_preview.config(state=tk.DISABLED)
         self.btn_play_loop.config(state=tk.DISABLED)
         self.btn_save_with_loop.config(state=tk.DISABLED)
@@ -331,13 +326,11 @@ class LoopFinderApp:
             self.btn_play_loop.config(state=tk.DISABLED)
             self.btn_save_with_loop.config(state=tk.DISABLED)
 
-        self.btn_analyze.config(state=tk.NORMAL) # Re-enable analysis button
 
     def show_analysis_error(self, error_message):
         """Displays analysis error in the GUI thread."""
         messagebox.showerror("Analysis Error", f"An error occurred during analysis:\n{error_message}")
         self.set_status("Analysis failed.")
-        self.btn_analyze.config(state=tk.NORMAL)
 
 
     def on_loop_select(self, event):
