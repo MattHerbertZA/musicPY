@@ -216,7 +216,7 @@ class LoopFinderApp:
 
         # --- Waveform Frame ---
         self.frame_waveform = tk.Frame(root, pady=5)
-        self.frame_waveform.pack(fill=tk.X, padx=5)
+        # Don't pack it initially - we'll pack it when a song is loaded
         
         # Create matplotlib figure
         self.fig = Figure(figsize=(5, 1.5), dpi=100)
@@ -253,6 +253,9 @@ class LoopFinderApp:
         if not self.filepath:
             return
 
+        # Hide waveform if it was previously shown
+        self.frame_waveform.pack_forget()
+        
         self.lbl_filename.config(text=os.path.basename(self.filepath), fg="black")
         self.set_status(f"Loading {os.path.basename(self.filepath)}...")
         self.listbox_loops.delete(0, tk.END)
@@ -274,15 +277,16 @@ class LoopFinderApp:
     def _load_audio_thread(self):
         try:
             self.y, self.sr = librosa.load(self.filepath, sr=None, mono=True)
-             # Ensure data is float32 for sounddevice compatibility later
             if self.y.dtype != np.float32:
                 self.y = self.y.astype(np.float32)
 
-            # Update the waveform plot
-            self.root.after(0, self.update_waveform_plot)
+            # Show and update the waveform plot
+            self.root.after(0, lambda: (
+                self.frame_waveform.pack(fill=tk.X, padx=5, before=self.lbl_status),
+                self.update_waveform_plot()
+            ))
             
             self.set_status("Audio loaded successfully. Ready to analyze.")
-            # automatically analyze the audio file
             self.run_analysis()
         except Exception as e:
             self.root.after(0, self.show_load_error, str(e))
