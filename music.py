@@ -9,6 +9,9 @@ import threading
 import os
 import time # For potential small delays if needed
 import soundfile as sf
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
 
 # --- Configuration ---
 MIN_LOOP_DURATION_SEC = 2.0
@@ -211,6 +214,19 @@ class LoopFinderApp:
                                           command=self.save_song_with_loop, state=tk.DISABLED)
         self.btn_save_with_loop.pack(side=tk.LEFT, padx=5)
 
+        # --- Waveform Frame ---
+        self.frame_waveform = tk.Frame(root, pady=5)
+        self.frame_waveform.pack(fill=tk.X, padx=5)
+        
+        # Create matplotlib figure
+        self.fig = Figure(figsize=(5, 1.5), dpi=100)
+        self.ax = self.fig.add_subplot(111)
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.frame_waveform)
+        self.canvas.get_tk_widget().pack(fill=tk.X, expand=True)
+        
+        # Store the current highlight patch
+        self.highlight_patch = None
+
         self.lbl_status = tk.Label(root, text="Status: Idle", bd=1, relief=tk.SUNKEN, anchor=tk.W)
         self.lbl_status.pack(side=tk.BOTTOM, fill=tk.X)
 
@@ -262,6 +278,9 @@ class LoopFinderApp:
             if self.y.dtype != np.float32:
                 self.y = self.y.astype(np.float32)
 
+            # Update the waveform plot
+            self.root.after(0, self.update_waveform_plot)
+            
             self.set_status("Audio loaded successfully. Ready to analyze.")
             # automatically analyze the audio file
             self.run_analysis()
@@ -334,15 +353,26 @@ class LoopFinderApp:
 
 
     def on_loop_select(self, event):
-        """Enables playback buttons when a loop is selected."""
+        """Updates the waveform highlight when a loop is selected."""
         if self.listbox_loops.curselection() and self.loop_candidates:
-             self.btn_preview.config(state=tk.NORMAL)
-             self.btn_play_loop.config(state=tk.NORMAL)
-             self.btn_save_with_loop.config(state=tk.NORMAL)
+            self.btn_preview.config(state=tk.NORMAL)
+            self.btn_play_loop.config(state=tk.NORMAL)
+            self.btn_save_with_loop.config(state=tk.NORMAL)
+            
+            # Update the waveform highlight
+            start_time, end_time = self._get_selected_loop_times()
+            if start_time is not None and end_time is not None:
+                self.highlight_loop_region(start_time, end_time)
         else:
-             self.btn_preview.config(state=tk.DISABLED)
-             self.btn_play_loop.config(state=tk.DISABLED)
-             self.btn_save_with_loop.config(state=tk.DISABLED)
+            self.btn_preview.config(state=tk.DISABLED)
+            self.btn_play_loop.config(state=tk.DISABLED)
+            self.btn_save_with_loop.config(state=tk.DISABLED)
+            
+            # Remove highlight if no selection
+            if self.highlight_patch:
+                self.highlight_patch.remove()
+                self.highlight_patch = None
+                self.canvas.draw()
 
 
     def _get_selected_loop_times(self):
@@ -709,6 +739,38 @@ class LoopFinderApp:
             traceback.print_exc()
             messagebox.showerror("Save Error", error_message)
             self.set_status("Error saving modified song.")
+
+    def update_waveform_plot(self):
+        """Updates the waveform visualization."""
+        try:
+            self.ax.clear()
+            times = np.arange(len(self.y)) / self.sr
+            self.ax.plot(times, self.y, color='blue', alpha=0.5, linewidth=0.5)
+            self.ax.set_xlabel('Time (s)')
+            self.ax.set_ylabel('Amplitude')
+            self.ax.set_title('Waveform')
+            # Remove margins to maximize waveform size
+            self.fig.tight_layout()
+            self.canvas.draw()
+        except Exception as e:
+            print(f"Error updating waveform: {e}")
+
+    def highlight_loop_region(self, start_time, end_time):
+        """Highlights the selected loop region on the waveform."""
+        try:
+            # Remove existing highlight if any
+            if self.highlight_patch:
+                self.highlight_patch.remove()
+                self.highlight_patch = None
+
+            # Add new highlight
+            self.highlight_patch = self.ax.axvspan(
+                start_time, end_time,
+                color='red', alpha=0.3
+            )
+            self.canvas.draw()
+        except Exception as e:
+            print(f"Error highlighting region: {e}")
 
 
 # --- Main Execution ---
