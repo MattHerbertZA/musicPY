@@ -8,6 +8,7 @@ import sounddevice as sd
 import threading
 import os
 import time # For potential small delays if needed
+import soundfile as sf
 
 # --- Configuration ---
 MIN_LOOP_DURATION_SEC = 2.0
@@ -199,13 +200,18 @@ class LoopFinderApp:
         self.btn_preview = tk.Button(self.frame_bottom, text="Preview Segment", command=self.preview_selected_segment, state=tk.DISABLED)
         self.btn_preview.pack(side=tk.LEFT, padx=5)
 
-        # New button for looping playback
+        # Button for looping playback
         self.btn_play_loop = tk.Button(self.frame_bottom, text="Play Loop", command=self.start_looping_playback, state=tk.DISABLED)
         self.btn_play_loop.pack(side=tk.LEFT, padx=5)
 
         # Stop button handles both
         self.btn_stop = tk.Button(self.frame_bottom, text="Stop Playback", command=self.stop_playback)
         self.btn_stop.pack(side=tk.LEFT, padx=5)
+
+        # Save with loop button
+        self.btn_save_with_loop = tk.Button(self.frame_bottom, text="Insert Loop & Save Song", 
+                                          command=self.save_song_with_loop, state=tk.DISABLED)
+        self.btn_save_with_loop.pack(side=tk.LEFT, padx=5)
 
         self.lbl_status = tk.Label(root, text="Status: Idle", bd=1, relief=tk.SUNKEN, anchor=tk.W)
         self.lbl_status.pack(side=tk.BOTTOM, fill=tk.X)
@@ -239,6 +245,7 @@ class LoopFinderApp:
         self.btn_analyze.config(state=tk.DISABLED)
         self.btn_preview.config(state=tk.DISABLED)
         self.btn_play_loop.config(state=tk.DISABLED) # Disable loop button too
+        self.btn_save_with_loop.config(state=tk.DISABLED)
         self.loop_candidates = []
         self.y = None
         self.sr = None
@@ -260,6 +267,8 @@ class LoopFinderApp:
 
             self.set_status("Audio loaded successfully. Ready to analyze.")
             self.root.after(0, lambda: self.btn_analyze.config(state=tk.NORMAL)) # Update GUI in main thread
+            # automatically analyze the audio file
+            self.run_analysis()
         except Exception as e:
             self.root.after(0, self.show_load_error, str(e))
 
@@ -280,6 +289,7 @@ class LoopFinderApp:
         self.btn_analyze.config(state=tk.DISABLED)
         self.btn_preview.config(state=tk.DISABLED)
         self.btn_play_loop.config(state=tk.DISABLED)
+        self.btn_save_with_loop.config(state=tk.DISABLED)
         self.listbox_loops.delete(0, tk.END)
 
         analysis_thread = threading.Thread(
@@ -319,6 +329,7 @@ class LoopFinderApp:
             self.set_status("Analysis complete. No loops found matching criteria.")
             self.btn_preview.config(state=tk.DISABLED) # Ensure buttons are disabled if no loops
             self.btn_play_loop.config(state=tk.DISABLED)
+            self.btn_save_with_loop.config(state=tk.DISABLED)
 
         self.btn_analyze.config(state=tk.NORMAL) # Re-enable analysis button
 
@@ -334,9 +345,11 @@ class LoopFinderApp:
         if self.listbox_loops.curselection() and self.loop_candidates:
              self.btn_preview.config(state=tk.NORMAL)
              self.btn_play_loop.config(state=tk.NORMAL)
+             self.btn_save_with_loop.config(state=tk.NORMAL)
         else:
              self.btn_preview.config(state=tk.DISABLED)
              self.btn_play_loop.config(state=tk.DISABLED)
+             self.btn_save_with_loop.config(state=tk.DISABLED)
 
 
     def _get_selected_loop_times(self):
@@ -588,6 +601,121 @@ class LoopFinderApp:
         # Wait a tiny moment for stop actions to potentially complete
         time.sleep(0.1)
         self.root.destroy()
+
+    def save_song_with_loop(self):
+        """Inserts the selected loop multiple times and saves the modified song."""
+        start_time, end_time = self._get_selected_loop_times()
+        if start_time is None:
+            messagebox.showwarning("Save Warning", "Please select a loop to insert.")
+            return
+
+        if self.filepath is None:
+            messagebox.showerror("Save Error", "No source audio file loaded.")
+            return
+
+        try:
+            # Ask user how many times to repeat the loop
+            repeat_dialog = tk.Toplevel(self.root)
+            repeat_dialog.title("Loop Repetitions")
+            repeat_dialog.geometry("300x150")
+            repeat_dialog.transient(self.root)  # Make dialog modal
+            repeat_dialog.grab_set()
+
+            tk.Label(repeat_dialog, 
+                    text="How many times should the section repeat?",
+                    pady=10).pack()
+
+            repeat_var = tk.StringVar(value="4")  # Default value
+            repeat_entry = tk.Entry(repeat_dialog, textvariable=repeat_var)
+            repeat_entry.pack(pady=5)
+
+            def process_and_save():
+                try:
+                    repeats = int(repeat_var.get())
+                    if repeats < 1:
+                        messagebox.showwarning("Invalid Input", "Please enter a positive number.")
+                        return
+                    repeat_dialog.destroy()
+                    self._process_and_save_with_loop(start_time, end_time, repeats)
+                except ValueError:
+                    messagebox.showwarning("Invalid Input", "Please enter a valid number.")
+
+            tk.Button(repeat_dialog, text="OK", command=process_and_save).pack(pady=10)
+            tk.Button(repeat_dialog, text="Cancel", command=repeat_dialog.destroy).pack()
+
+            # Center the dialog on the main window
+            repeat_dialog.update_idletasks()
+            x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (repeat_dialog.winfo_width() // 2)
+            y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (repeat_dialog.winfo_height() // 2)
+            repeat_dialog.geometry(f"+{x}+{y}")
+
+        except Exception as e:
+            error_message = f"Error preparing to save: {str(e)}"
+            print(error_message)
+            messagebox.showerror("Save Error", error_message)
+            self.set_status("Error in save preparation.")
+
+    def _process_and_save_with_loop(self, start_time, end_time, repeats):
+        """Internal method to process the audio and save with repeated loop."""
+        try:
+            # Convert times to samples
+            start_sample = librosa.time_to_samples(start_time, sr=self.sr)
+            end_sample = librosa.time_to_samples(end_time, sr=self.sr)
+            
+            # Extract the loop segment
+            loop_data = self.y[start_sample:end_sample]
+            
+            if loop_data.size == 0:
+                messagebox.showerror("Save Error", "Selected loop segment is empty.")
+                return
+
+            # Create the new audio array
+            # Keep everything before the loop
+            new_audio = list(self.y[:start_sample])
+            
+            # Add the loop repeated times
+            for _ in range(repeats):
+                new_audio.extend(loop_data)
+            
+            # Add everything after the loop
+            new_audio.extend(self.y[end_sample:])
+            
+            # Convert to numpy array, maintaining original data type
+            new_audio = np.array(new_audio, dtype=self.y.dtype)
+
+            # Generate new filename
+            original_path = os.path.splitext(self.filepath)[0]
+            original_ext = os.path.splitext(self.filepath)[1]
+            new_filename = f"{original_path}_with_{repeats}x_loop{original_ext}"
+
+            # Ask user for save location
+            save_path = filedialog.asksaveasfilename(
+                initialfile=os.path.basename(new_filename),
+                defaultextension=original_ext,
+                filetypes=[
+                    ("WAV files", "*.wav"),
+                    ("All files", "*.*")
+                ]
+            )
+
+            if not save_path:  # User cancelled
+                return
+
+            # Save the modified song with highest quality settings
+            self.set_status("Saving modified song...")
+            sf.write(save_path, new_audio, self.sr, 'PCM_32')  # Using 32-bit PCM for highest quality
+
+            self.set_status(f"Song saved successfully with {repeats} loop repetitions")
+            messagebox.showinfo("Success", 
+                              f"Song saved successfully with {repeats} loop repetitions to:\n{save_path}")
+
+        except Exception as e:
+            error_message = f"Error saving modified song: {str(e)}"
+            print(error_message)
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror("Save Error", error_message)
+            self.set_status("Error saving modified song.")
 
 
 # --- Main Execution ---
