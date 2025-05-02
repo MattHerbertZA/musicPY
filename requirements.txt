@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+librosa
+sounddevice
+soundfile
+numpy
+tkinter
+sse-starlette
+
+
